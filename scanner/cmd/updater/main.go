@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
+	"os"
 	"time"
 
 	"github.com/quay/zlog"
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"github.com/stackrox/rox/scanner/internal/version"
 	"github.com/stackrox/rox/scanner/updater"
@@ -27,17 +30,22 @@ func tryExport(ctx context.Context, outputDir string, opts *updater.ExportOption
 }
 
 func main() {
-	var ctx = context.Background()
+	ctx := context.Background()
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	var slogLevel slog.LevelVar
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: &slogLevel,
+	})))
 
-	var rootCmd = &cobra.Command{
+	rootCmd := &cobra.Command{
 		Use:          "updater",
 		Version:      version.Version,
 		SilenceUsage: true,
 		Short:        "StackRox Scanner vulnerability updater",
 	}
 
-	var exportCmd = &cobra.Command{
-		Use:   "export [--manual-url <url>] <output-dir>",
+	exportCmd := &cobra.Command{
+		Use:   "export [--debug] [--manual-url <url>] <output-dir>",
 		Short: "Export vulnerabilities and write bundle(s) to <output-dir>.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -46,6 +54,16 @@ func main() {
 			if err != nil {
 				return err
 			}
+
+			debugFlag, err := cmd.Flags().GetBool("debug")
+			if err != nil {
+				return err
+			}
+			if debugFlag {
+				zerolog.SetGlobalLevel(zerolog.DebugLevel)
+				slogLevel.Set(slog.LevelDebug)
+			}
+
 			const retries = 3
 			for attempt := 1; attempt <= retries; attempt++ {
 				zlog.Info(ctx).
@@ -71,8 +89,9 @@ func main() {
 		},
 	}
 	exportCmd.Flags().String("manual-url", DefaultURL, "URL to the manual vulnerability data.")
+	exportCmd.Flags().Bool("debug", os.Getenv("RUNNER_DEBUG") == "1", "enable debug logging")
 
-	var importCmd = &cobra.Command{
+	importCmd := &cobra.Command{
 		Use:   "import",
 		Short: "Import vulnerabilities using the provided database and URL",
 		RunE: func(cmd *cobra.Command, _ []string) error {
